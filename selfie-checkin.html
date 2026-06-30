@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Check In</title>
+<style>
+  :root {
+    --ink: #1c1c1c;
+    --paper: #faf8f4;
+    --accent: #c9512f;
+    --line: #ddd6c9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: #6b6458;
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #4a453c;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: 16px;
+    background: white;
+    margin-bottom: 20px;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  video, canvas, img.preview {
+    width: 100%;
+    border-radius: 14px;
+    background: #000;
+    display: block;
+  }
+  video, canvas { transform: scaleX(-1); }
+  .frame {
+    position: relative;
+    margin-bottom: 16px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    aspect-ratio: 3/4;
+  }
+  .frame video, .frame canvas, .frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 14px;
+    background: #f0ede5;
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  .primary { background: var(--accent); color: white; }
+  .primary:disabled { background: #d8b6a9; cursor: not-allowed; }
+  .secondary { background: white; color: var(--ink); border: 1px solid var(--line); }
+  .status {
+    font-size: 13px;
+    text-align: center;
+    color: #6b6458;
+    margin-top: 8px;
+    min-height: 18px;
+  }
+  .meta {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+  .meta b { color: #4a453c; }
+  .hidden { display: none !important; }
+  .success {
+    text-align: center;
+    padding: 40px 0;
+  }
+  .success .check {
+    font-size: 40px;
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div id="formStep">
+    <h1>Check in</h1>
+    <p class="sub">Take a selfie to confirm your check-in. Your time and location will be recorded.</p>
+
+    <label for="nameInput">Your name</label>
+    <input type="text" id="nameInput" placeholder="Full name" autocomplete="name" />
+
+    <div class="frame" id="frame">
+      <div class="placeholder" id="placeholder">Camera preview will appear here</div>
+      <video id="video" autoplay playsinline class="hidden"></video>
+      <canvas id="canvas" class="hidden"></canvas>
+      <img id="preview" class="hidden" />
+    </div>
+
+    <button class="secondary" id="startCamBtn">Open camera</button>
+    <button class="primary hidden" id="captureBtn">Take selfie</button>
+    <button class="secondary hidden" id="retakeBtn">Retake</button>
+
+    <div id="metaBox" class="meta hidden">
+      <div><b>Time:</b> <span id="metaTime">—</span></div>
+      <div><b>Location:</b> <span id="metaLoc">Locating…</span></div>
+    </div>
+
+    <button class="primary hidden" id="submitBtn" disabled>Submit check-in</button>
+    <div class="status" id="statusMsg"></div>
+  </div>
+
+  <div id="successStep" class="success hidden">
+    <div class="check">✓</div>
+    <h1>You're checked in</h1>
+    <p class="sub" id="successDetail"></p>
+  </div>
+
+</div>
+
+<script>
+  // ===== CONFIG: paste your Google Apps Script Web App URL here =====
+  const SCRIPT_URL = "PASTE_YOUR_WEB_APP_URL_HERE";
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const preview = document.getElementById('preview');
+  const placeholder = document.getElementById('placeholder');
+  const startCamBtn = document.getElementById('startCamBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const retakeBtn = document.getElementById('retakeBtn');
+  const submitBtn = document.getElementById('submitBtn');
+  const metaBox = document.getElementById('metaBox');
+  const metaTime = document.getElementById('metaTime');
+  const metaLoc = document.getElementById('metaLoc');
+  const statusMsg = document.getElementById('statusMsg');
+  const nameInput = document.getElementById('nameInput');
+
+  let stream = null;
+  let photoDataUrl = null;
+  let capturedTime = null;
+  let coords = null;
+
+  startCamBtn.addEventListener('click', async () => {
+    if (!nameInput.value.trim()) {
+      statusMsg.textContent = "Please enter your name first.";
+      nameInput.focus();
+      return;
+    }
+    statusMsg.textContent = "";
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+      video.srcObject = stream;
+      placeholder.classList.add('hidden');
+      video.classList.remove('hidden');
+      startCamBtn.classList.add('hidden');
+      captureBtn.classList.remove('hidden');
+
+      // Kick off geolocation early so it's likely ready by capture time
+      requestLocation();
+    } catch (err) {
+      statusMsg.textContent = "Couldn't access camera: " + err.message;
+    }
+  });
+
+  captureBtn.addEventListener('click', () => {
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    // mirror to match preview
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, w, h);
+
+    photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    preview.src = photoDataUrl;
+
+    capturedTime = new Date();
+    metaTime.textContent = capturedTime.toLocaleString();
+
+    video.classList.add('hidden');
+    preview.classList.remove('hidden');
+    captureBtn.classList.add('hidden');
+    retakeBtn.classList.remove('hidden');
+    metaBox.classList.remove('hidden');
+    submitBtn.classList.remove('hidden');
+
+    stopStream();
+    updateSubmitState();
+  });
+
+  retakeBtn.addEventListener('click', async () => {
+    preview.classList.add('hidden');
+    retakeBtn.classList.add('hidden');
+    metaBox.classList.add('hidden');
+    submitBtn.classList.add('hidden');
+    photoDataUrl = null;
+    statusMsg.textContent = "";
+    startCamBtn.click();
+  });
+
+  function requestLocation() {
+    if (!navigator.geolocation) {
+      metaLoc.textContent = "Not supported by this browser";
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        coords = {
+          lat: pos.coords.latitude.toFixed(6),
+          lng: pos.coords.longitude.toFixed(6)
+        };
+        metaLoc.textContent = coords.lat + ", " + coords.lng;
+        updateSubmitState();
+      },
+      (err) => {
+        metaLoc.textContent = "Location unavailable (" + err.message + ")";
+        updateSubmitState();
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  function updateSubmitState() {
+    submitBtn.disabled = !photoDataUrl;
+  }
+
+  function stopStream() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+  }
+
+  submitBtn.addEventListener('click', async () => {
+    if (SCRIPT_URL.includes("PASTE_YOUR_WEB_APP_URL_HERE")) {
+      statusMsg.textContent = "Setup incomplete: add your Apps Script URL in the code.";
+      return;
+    }
+    submitBtn.disabled = true;
+    statusMsg.textContent = "Submitting…";
+
+    const payload = {
+      name: nameInput.value.trim(),
+      time: capturedTime.toLocaleString(),
+      lat: coords ? coords.lat : null,
+      lng: coords ? coords.lng : null,
+      photo: photoDataUrl
+    };
+
+    try {
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors", // Apps Script doesn't return CORS headers by default
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(payload)
+      });
+
+      document.getElementById('formStep').classList.add('hidden');
+      document.getElementById('successStep').classList.remove('hidden');
+      document.getElementById('successDetail').textContent =
+        nameInput.value.trim() + " · " + capturedTime.toLocaleString();
+    } catch (err) {
+      statusMsg.textContent = "Submission failed: " + err.message;
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
